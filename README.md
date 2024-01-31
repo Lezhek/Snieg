@@ -1,4 +1,4 @@
-"Unfortunately, the original version of Snieg is not compatible with Steam. This fork fixes this issue. This version is not compatible with SnowRunner versions for Epic Games and Microsoft Store."
+Unfortunately, the original version of Snieg is not compatible with Steam. This fork fixes this issue. This version is not compatible with SnowRunner versions for Epic Games and Microsoft Store.
 
 [Check out the original Snieg version for description](https://github.com/H3Cki/Snieg/tree/main)
 
