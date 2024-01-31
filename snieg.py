@@ -7,6 +7,10 @@ from zipfile import ZipFile
 from colors import *
 from discord.ext import commands
 import discord
+import os
+import winreg
+from colorama import init, Fore, Style
+import requests
 
 import aiohttp
 import asyncio
@@ -368,14 +372,88 @@ def warn():
     
     input(bg_white('Continue... (Press ENTER)', pad=True, style=style.DIM))
 
+def find_steam_folder():
+    try:
+        # Open the registry key where Steam information is stored
+        hkey = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, "SOFTWARE\WOW6432Node\Valve\Steam")
 
+        # Query the registry key for the Steam installation path
+        steam_path, _ = winreg.QueryValueEx(hkey, "InstallPath")
+
+        # Close the registry key
+        winreg.CloseKey(hkey)
+
+        return steam_path
+
+    except Exception as e:
+        print(f"Error accessing Windows Registry: {e}")
+        return None
+
+def find_snowrunner_save_folders(steam_folder, files_to_check):
+    userdata_folder = os.path.join(steam_folder, 'userdata')
+    snowrunner_save_folders = []
+
+    if os.path.exists(userdata_folder) and os.path.isdir(userdata_folder):
+        for steam_id_folder in os.listdir(userdata_folder):
+            steam_id_path = os.path.join(userdata_folder, steam_id_folder)
+
+            if os.path.isdir(steam_id_path):
+                snowrunner_save_path = os.path.join(steam_id_path, '1465360', 'remote')
+
+                if os.path.exists(snowrunner_save_path) and os.path.isdir(snowrunner_save_path):
+                    if check_files_exist(snowrunner_save_path, files_to_check):
+                        snowrunner_save_folders.append(snowrunner_save_path)
+
+    return snowrunner_save_folders
+
+def check_files_exist(folder_path, file_list):
+    for file_name in file_list:
+        file_path = os.path.join(folder_path, file_name)
+        if not os.path.exists(file_path):
+            return False
+    return True
+
+def get_valid_choice(max_value):
+    while True:
+        try:
+            choice = int(input(Fore.LIGHTMAGENTA_EX + "Enter the number of the folder to use as save_folder: "))
+            if 1 <= choice <= max_value:
+                return choice
+            else:
+                print(Fore.RED + "Invalid choice. Please enter a number within the range.")
+        except ValueError:
+            print(Fore.RED+ "Invalid input. Please enter a number.")
+
+def extract_steamid64_from_path(path):
+    path_components = os.path.normpath(path).split(os.path.sep)
+    userdata_index = path_components.index('userdata')
+    steamid3 = path_components[userdata_index + 1]
+    steamid64 = str(int(steamid3) + 76561197960265728)
+    return steamid64
+
+def get_steam_username(steamid64, api_key):
+    url = f'http://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={api_key}&steamids={steamid64}'
+    
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        
+        data = response.json()
+        player_data = data['response']['players'][0]
+        return player_data['personaname']
+
+    except requests.exceptions.RequestException as e:
+        print(Fore.RED + f"Error decoding JSON response from Steam API: {e}")
+        print(Fore.YELLOW + f"Check your Internet connection")
+
+        return f"UnknownUser(SteamID64)={steamid64}"  # Placeholder username
 
 def get_local_save_path():
-    local_dp = f'C:\\Users\\{os.getlogin()}\\Documents\\My Games\\SnowRunner'
+    local_dp = save_folder
     if not os.path.isdir(local_dp):
         if not CONFIG['custom_path']:
             print(red('Save directory not found, checking OneDrive.'))
-            local_dp = f'C:\\Users\\{os.getlogin()}\\OneDrive\\Documents\\My Games\\SnowRunner'
+            local_dp = save_folder
             if not os.path.isdir(local_dp):
                 print(red('OneDrive directory not found.'))
                 local_dp = input('Paste your snowrunner save directory path here (SnowRunner folder in Documents\\My Games, to paste copy and press right mouse button).\n> ')
@@ -385,7 +463,7 @@ def get_local_save_path():
             print(green('Loaded custom save directory'))
 
 
-    return os.path.join(local_dp, 'base', 'storage')
+    return os.path.join(local_dp)
 
 def get_fname_from_slotn(n):
     idx = n - 1 if n > 0 else ''
@@ -955,6 +1033,50 @@ def tog_colors():
     save_config()
     
 if __name__ == '__main__':
+    
+    steam_folder = find_steam_folder()
+    if steam_folder:
+        print(Fore.GREEN + f"Steam folder found: {steam_folder}")
+
+        files_to_check = [
+        ]
+
+        snowrunner_save_folders = find_snowrunner_save_folders(steam_folder, files_to_check)
+
+        if snowrunner_save_folders:
+            print(Fore.GREEN + "SnowRunner save folders found:")
+
+            # Fetch Steam usernames for each save folder
+            api_key = 'GET IT FROM https://steamcommunity.com/dev/apikey'
+            steam_usernames = []
+
+            for steam_folder_path in snowrunner_save_folders:
+                steamid64 = extract_steamid64_from_path(steam_folder_path)
+                steam_username = get_steam_username(steamid64, api_key)
+                steam_usernames.append(steam_username)
+
+            # Print the associations of folders with usernames
+            for i, (folder, username) in enumerate(zip(snowrunner_save_folders, steam_usernames), start=1):
+                print(Fore.LIGHTCYAN_EX + f"{i}. {folder} | Steam Username: {Fore.GREEN + username}")
+
+            max_value = len(snowrunner_save_folders)
+            choice = get_valid_choice(max_value)
+            save_folder = snowrunner_save_folders[choice - 1]
+            steamid64 = extract_steamid64_from_path(save_folder)
+            steam_username = get_steam_username(steamid64, api_key)
+
+            print(Fore.CYAN + f"Save folder selected for user: {Fore.GREEN + steam_username}") 
+                        
+            if check_files_exist(save_folder, files_to_check):
+                print({save_folder})
+            else:
+                print("Some or all required files are missing.")
+        else:
+            print("No SnowRunner save folders found.")
+    else:
+        print("Steam folder not found.")
+    save_folder = os.path.dirname(save_folder)
+
     os.system('color')
     load_config()
     set_colors()
@@ -996,6 +1118,7 @@ if __name__ == '__main__':
                     print(red("Error: " + str(e)))
             elif x == '2':
                 try:
+                    print (save_folder)
                     export()
                 except RuntimeError as e:
                     print(red("Error: " + str(e)))
@@ -1024,4 +1147,3 @@ if __name__ == '__main__':
             break
         #except Exception as e:
             #input(red(f'\nError: {str(e)}'))
-
